@@ -8,6 +8,8 @@ from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.compose import make_column_transformer
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import LabelEncoder
+from sklearn.model_selection import train_test_split
+from huggingface_hub import login, HfApi, hf_hub_download
 # for model training, tuning, and evaluation
 import xgboost as xgb
 from sklearn.model_selection import GridSearchCV
@@ -16,7 +18,7 @@ from sklearn.metrics import accuracy_score, classification_report, recall_score
 import joblib
 
 
-bank_dataset = pd.read_csv("tourism/data/tourism.csv")
+df = pd.read_csv("tourism/data/tourism.csv")
 print("Dataset loaded successfully.")
 
 
