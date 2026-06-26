@@ -12,29 +12,25 @@ import joblib
 # for creating a folder
 import os
 # for hugging face space authentication to upload files
-from huggingface_hub import login, HfApi, create_repo, hf_hub_download
+from huggingface_hub import login, HfApi, create_repo
 from huggingface_hub.utils import RepositoryNotFoundError, HfHubHTTPError
 import mlflow
-from sklearn.utils.class_weight import compute_class_weight # Import compute_class_weight
 
 mlflow.set_tracking_uri("http://localhost:5000")
 mlflow.set_experiment("mlops-training-experiment")
 
-
 api = HfApi()
 
-# Define the Hugging Face repository ID
-HF_REPO_ID = "divyavarmamisc/tourism-prediction"
 
-Xtrain_path = "hf://datasets/divyavarmamisc/tourism-prediction/Xtrain.csv"
-Xtest_path = "hf://datasets/divyavarmamisc/tourism-prediction/Xtest.csv"
-ytrain_path = "hf://datasets/divyavarmamisc/tourism-prediction/ytrain.csv"
-ytest_path = "hf://datasets/divyavarmamisc/tourism-prediction/ytest.csv"
+Xtrain_path = "hf://datasets/divyavarmamisc/toursim-prediction/Xtrain.csv"
+Xtest_path = "hf://datasets/divyavarmamisc/toursim-predictionXtest.csv"
+ytrain_path = "hf://datasets/divyavarmamisc/toursim-prediction/ytrain.csv"
+ytest_path = "hf://datasets/divyavarmamisc/toursim-prediction/ytest.csv"
 
-Xtrain = pd.read_csv(Xtrain_path).squeeze("columns")
-Xtest = pd.read_csv(Xtest_path).squeeze("columns")
-ytrain = pd.read_csv(ytrain_path).squeeze("columns")
-ytest = pd.read_csv(ytest_path).squeeze("columns")
+Xtrain = pd.read_csv(Xtrain_path)
+Xtest = pd.read_csv(Xtest_path)
+ytrain = pd.read_csv(ytrain_path)
+ytest = pd.read_csv(ytest_path)
 
 
 # One-hot encode 'Type' and scale numeric features
@@ -49,15 +45,9 @@ numeric_features = [
 categorical_features = ['Gender']
 
 
-# FIX: Remove inappropriate scale_pos_weight calculation for multi-class
-# Calculate class weights for multi-class imbalance
-classes = ytrain.unique()
-class_weights_array = compute_class_weight(class_weight='balanced', classes=classes, y=ytrain)
-class_weights_dict = {c: w for c, w in zip(classes, class_weights_array)}
-
-# Create sample weights for the training data
-sample_weights_train = ytrain.map(class_weights_dict)
-
+# Set the clas weight to handle class imbalance
+class_weight = ytrain.value_counts()[0] / ytrain.value_counts()[1]
+class_weight
 
 # Define the preprocessing steps
 preprocessor = make_column_transformer(
@@ -66,8 +56,7 @@ preprocessor = make_column_transformer(
 )
 
 # Define base XGBoost model
-# FIX: Remove scale_pos_weight as it's for binary classification. Use objective for multi-class.
-xgb_model = xgb.XGBClassifier(random_state=42, objective='multi:softmax')
+xgb_model = xgb.XGBClassifier(scale_pos_weight=class_weight, random_state=42)
 
 # Define hyperparameter grid
 param_grid = {
@@ -86,8 +75,7 @@ model_pipeline = make_pipeline(preprocessor, xgb_model)
 with mlflow.start_run():
     # Hyperparameter tuning
     grid_search = GridSearchCV(model_pipeline, param_grid, cv=5, n_jobs=-1)
-    # FIX: Pass sample_weight to the fit method of GridSearchCV via fit_params
-    grid_search.fit(Xtrain, ytrain, xgbclassifier__sample_weight=sample_weights_train)
+    grid_search.fit(Xtrain, ytrain)
 
     # Log all parameter combinations and their mean test scores
     results = grid_search.cv_results_
@@ -108,25 +96,27 @@ with mlflow.start_run():
     # Store and evaluate the best model
     best_model = grid_search.best_estimator_
 
-    # FIX: Simplify prediction for multi-class and remove binary threshold logic
-    y_pred_train = best_model.predict(Xtrain)
-    y_pred_test = best_model.predict(Xtest)
+    classification_threshold = 0.45
 
-    # Use classification_report directly on multi-class predictions
+    y_pred_train_proba = best_model.predict_proba(Xtrain)[:, 1]
+    y_pred_train = (y_pred_train_proba >= classification_threshold).astype(int)
+
+    y_pred_test_proba = best_model.predict_proba(Xtest)[:, 1]
+    y_pred_test = (y_pred_test_proba >= classification_threshold).astype(int)
+
     train_report = classification_report(ytrain, y_pred_train, output_dict=True)
     test_report = classification_report(ytest, y_pred_test, output_dict=True)
 
     # Log the metrics for the best model
-    # FIX: Adjust logged metrics for multi-class, using 'macro avg' for aggregated metrics.
     mlflow.log_metrics({
         "train_accuracy": train_report['accuracy'],
-        "train_macro_precision": train_report['macro avg']['precision'],
-        "train_macro_recall": train_report['macro avg']['recall'],
-        "train_macro_f1-score": train_report['macro avg']['f1-score'],
+        "train_precision": train_report['1']['precision'],
+        "train_recall": train_report['1']['recall'],
+        "train_f1-score": train_report['1']['f1-score'],
         "test_accuracy": test_report['accuracy'],
-        "test_macro_precision": test_report['macro avg']['precision'],
-        "test_macro_recall": test_report['macro avg']['recall'],
-        "test_macro_f1-score": test_report['macro avg']['f1-score']
+        "test_precision": test_report['1']['precision'],
+        "test_recall": test_report['1']['recall'],
+        "test_f1-score": test_report['1']['f1-score']
     })
 
     # Save the model locally
