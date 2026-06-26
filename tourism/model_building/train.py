@@ -20,11 +20,9 @@ from sklearn.utils.class_weight import compute_class_weight # Import compute_cla
 mlflow.set_tracking_uri("http://localhost:5000")
 mlflow.set_experiment("mlops-training-experiment")
 
-# Retrieve and strip the token from Colab secrets
-raw_token = userdata.get('HF_TOKEN')
-token = raw_token.strip()
 
-api = HfApi(token=token)
+api = HfApi(token=os.getenv("HF_TOKEN"))
+
 
 # Define the Hugging Face repository ID
 HF_REPO_ID = "divyavarmamisc/tourism-prediction"
