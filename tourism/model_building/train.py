@@ -14,7 +14,6 @@ import os
 # for hugging face space authentication to upload files
 from huggingface_hub import login, HfApi, create_repo, hf_hub_download
 from huggingface_hub.utils import RepositoryNotFoundError, HfHubHTTPError
-from google.colab import userdata # Import userdata
 import mlflow
 from sklearn.utils.class_weight import compute_class_weight # Import compute_class_weight
 
