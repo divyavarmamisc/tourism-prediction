@@ -26,42 +26,15 @@ api = HfApi()
 # Define the Hugging Face repository ID
 HF_REPO_ID = "divyavarmamisc/tourism-prediction"
 
-# Download and load the data files explicitly
-try:
-    Xtrain_local_path = hf_hub_download(
-        repo_id=HF_REPO_ID,
-        filename="Xtrain.csv",
-        repo_type="dataset",
-        token=token
-    )
-    Xtest_local_path = hf_hub_download(
-        repo_id=HF_REPO_ID,
-        filename="Xtest.csv",
-        repo_type="dataset",
-        token=token
-    )
-    ytrain_local_path = hf_hub_download(
-        repo_id=HF_REPO_ID,
-        filename="ytrain.csv",
-        repo_type="dataset",
-        token=token
-    )
-    ytest_local_path = hf_hub_download(
-        repo_id=HF_REPO_ID,
-        filename="ytest.csv",
-        repo_type="dataset",
-        token=token
-    )
+Xtrain_path = "hf://datasets/divyavarmamisc/tourism-prediction/Xtrain.csv"
+Xtest_path = "hf://datasets/divyavarmamisc/tourism-prediction/Xtest.csv"
+ytrain_path = "hf://datasets/divyavarmamisc/tourism-prediction/ytrain.csv"
+ytest_path = "hf://datasets/divyavarmamisc/tourism-prediction/ytest.csv"
 
-    Xtrain = pd.read_csv(Xtrain_local_path)
-    Xtest = pd.read_csv(Xtest_local_path)
-    # FIX: Load ytrain and ytest as Series from the 'NumberOfPersonVisiting' column
-    ytrain = pd.read_csv(ytrain_local_path)['NumberOfPersonVisiting'].squeeze()
-    ytest = pd.read_csv(ytest_local_path)['NumberOfPersonVisiting'].squeeze()
-    print("All datasets loaded successfully from Hugging Face.")
-except Exception as e:
-    print(f"Error downloading or loading datasets: {e}")
-    raise
+Xtrain = pd.read_csv(Xtrain_path)
+Xtest = pd.read_csv(Xtest_path)
+ytrain = pd.read_csv(ytrain_path)
+ytest = pd.read_csv(ytest_path)
 
 
 # One-hot encode 'Type' and scale numeric features
