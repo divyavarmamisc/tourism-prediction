@@ -21,8 +21,7 @@ mlflow.set_tracking_uri("http://localhost:5000")
 mlflow.set_experiment("mlops-training-experiment")
 
 
-api = HfApi(token=os.getenv("HF_TOKEN"))
-
+api = HfApi()
 
 # Define the Hugging Face repository ID
 HF_REPO_ID = "divyavarmamisc/tourism-prediction"
