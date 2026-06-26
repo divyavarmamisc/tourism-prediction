@@ -13,6 +13,7 @@ from huggingface_hub import login, HfApi, hf_hub_download
 # for model training, tuning, and evaluation
 import xgboost as xgb
 from sklearn.model_selection import GridSearchCV
+import mlflow
 from sklearn.metrics import accuracy_score, classification_report, recall_score
 # for model serialization
 import joblib
