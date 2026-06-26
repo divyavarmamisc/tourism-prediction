@@ -31,10 +31,10 @@ Xtest_path = "hf://datasets/divyavarmamisc/tourism-prediction/Xtest.csv"
 ytrain_path = "hf://datasets/divyavarmamisc/tourism-prediction/ytrain.csv"
 ytest_path = "hf://datasets/divyavarmamisc/tourism-prediction/ytest.csv"
 
-Xtrain = pd.read_csv(Xtrain_path)
-Xtest = pd.read_csv(Xtest_path)
-ytrain = pd.read_csv(ytrain_path)
-ytest = pd.read_csv(ytest_path)
+Xtrain = pd.read_csv(Xtrain_path).squeeze("columns")
+Xtest = pd.read_csv(Xtest_path).squeeze("columns")
+ytrain = pd.read_csv(ytrain_path).squeeze("columns")
+ytest = pd.read_csv(ytest_path).squeeze("columns")
 
 
 # One-hot encode 'Type' and scale numeric features
@@ -130,7 +130,7 @@ with mlflow.start_run():
     })
 
     # Save the model locally
-    model_path = "best_machine_failure_model_v1.joblib"
+    model_path = "best_tourism_model_v1.joblib"
     joblib.dump(best_model, model_path)
 
     # Log the model artifact
@@ -138,7 +138,7 @@ with mlflow.start_run():
     print(f"Model saved as artifact at: {model_path}")
 
     # Upload to Hugging Face
-    repo_id = "praneeth232/machine_failure_model"
+    repo_id = "divyavarmamisc/tourism_model"
     repo_type = "model"
 
     # Step 1: Check if the space exists
@@ -152,8 +152,8 @@ with mlflow.start_run():
 
     # create_repo("churn-model", repo_type="model", private=False)
     api.upload_file(
-        path_or_fileobj="best_machine_failure_model_v1.joblib",
-        path_in_repo="best_machine_failure_model_v1.joblib",
+        path_or_fileobj="best_tourism_model_v1.joblib",
+        path_in_repo="best_tourism_model_v1.joblib",
         repo_id=repo_id,
         repo_type=repo_type,
     )
