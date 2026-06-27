@@ -8,7 +8,7 @@ model_path = hf_hub_download(repo_id="divyavarmamisc/prod_taken_model", filename
 model = joblib.load(model_path)
 
 # Streamlit UI for Product Taken Prediction
-st.title("Product Taken Prediction App")
+st.title("Customer Purchase Prediction App")
 st.write("""
 This application predicts whether a customer will take the pitched product based on their demographic and interaction data.
 Please enter the customer details below to get a prediction.
