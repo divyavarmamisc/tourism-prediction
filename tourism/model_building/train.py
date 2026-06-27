@@ -20,44 +20,57 @@ from sklearn.utils.class_weight import compute_class_weight # Import compute_cla
 mlflow.set_tracking_uri("http://localhost:5000")
 mlflow.set_experiment("mlops-training-experiment")
 
+# Dummy token for local testing if not in Colab/GH Actions
+token = os.getenv("HF_TOKEN", "hf_dummy_token_for_testing")
 
-api = HfApi()
+# Login to Hugging Face Hub if a valid token is available
+if token and token != "hf_dummy_token_for_testing":
+    login(token=token, add_to_git_credential=False)
+
+api = HfApi(token=token)
 
 # Define the Hugging Face repository ID
 HF_REPO_ID = "divyavarmamisc/tourism-prediction"
 
-Xtrain_path = "hf://datasets/divyavarmamisc/tourism-prediction/Xtrain.csv"
-Xtest_path = "hf://datasets/divyavarmamisc/tourism-prediction/Xtest.csv"
-ytrain_path = "hf://datasets/divyavarmamisc/tourism-prediction/ytrain.csv"
-ytest_path = "hf://datasets/divyavarmamisc/tourism-prediction/ytest.csv"
+# Download train/test data from Hugging Face
+Xtrain = pd.read_csv(hf_hub_download(repo_id=HF_REPO_ID, filename="Xtrain.csv", repo_type="dataset", token=token))
+Xtest = pd.read_csv(hf_hub_download(repo_id=HF_REPO_ID, filename="Xtest.csv", repo_type="dataset", token=token))
+ytrain = pd.read_csv(hf_hub_download(repo_id=HF_REPO_ID, filename="ytrain.csv", repo_type="dataset", token=token)).squeeze("columns")
+ytest = pd.read_csv(hf_hub_download(repo_id=HF_REPO_ID, filename="ytest.csv", repo_type="dataset", token=token)).squeeze("columns")
 
-Xtrain = pd.read_csv(Xtrain_path).squeeze("columns")
-Xtest = pd.read_csv(Xtest_path).squeeze("columns")
-ytrain = pd.read_csv(ytrain_path).squeeze("columns")
-ytest = pd.read_csv(ytest_path).squeeze("columns")
-
-
-# One-hot encode 'Type' and scale numeric features
+# Define numeric and categorical features (must match prep.py)
 numeric_features = [
+    'Age',
+    'DurationOfPitch',
+    'NumberOfPersonVisiting',
     'NumberOfFollowups',
-    'NumberOfTrips',
     'PreferredPropertyStar',
-    'PitchSatisfactionScore',
-    'MonthlyIncome',
-    'NumberOfChildrenVisiting'
+    'NumberOfTrips',
+    'NumberOfChildrenVisiting',
+    'MonthlyIncome'
 ]
-categorical_features = ['Gender']
+categorical_features = [
+    'TypeofContact',
+    'CityTier',
+    'Occupation',
+    'Gender',
+    'ProductPitched',
+    'MaritalStatus',
+    'Passport',
+    'PitchSatisfactionScore',
+    'OwnCar',
+    'Designation'
+]
 
-
-# FIX: Remove inappropriate scale_pos_weight calculation for multi-class
-# Calculate class weights for multi-class imbalance
+# Calculate class weights for binary imbalance
 classes = ytrain.unique()
+# Ensure classes are sorted for consistent compute_class_weight behavior
+classes.sort()
 class_weights_array = compute_class_weight(class_weight='balanced', classes=classes, y=ytrain)
 class_weights_dict = {c: w for c, w in zip(classes, class_weights_array)}
 
 # Create sample weights for the training data
 sample_weights_train = ytrain.map(class_weights_dict)
-
 
 # Define the preprocessing steps
 preprocessor = make_column_transformer(
@@ -65,9 +78,8 @@ preprocessor = make_column_transformer(
     (OneHotEncoder(handle_unknown='ignore'), categorical_features)
 )
 
-# Define base XGBoost model
-# FIX: Remove scale_pos_weight as it's for binary classification. Use objective for multi-class.
-xgb_model = xgb.XGBClassifier(random_state=42, objective='multi:softmax')
+# Define base XGBoost model for binary classification
+xgb_model = xgb.XGBClassifier(random_state=42, objective='binary:logistic')
 
 # Define hyperparameter grid
 param_grid = {
@@ -86,7 +98,7 @@ model_pipeline = make_pipeline(preprocessor, xgb_model)
 with mlflow.start_run():
     # Hyperparameter tuning
     grid_search = GridSearchCV(model_pipeline, param_grid, cv=5, n_jobs=-1)
-    # FIX: Pass sample_weight to the fit method of GridSearchCV via fit_params
+    # Pass sample_weight to the fit method of GridSearchCV via fit_params
     grid_search.fit(Xtrain, ytrain, xgbclassifier__sample_weight=sample_weights_train)
 
     # Log all parameter combinations and their mean test scores
@@ -108,29 +120,28 @@ with mlflow.start_run():
     # Store and evaluate the best model
     best_model = grid_search.best_estimator_
 
-    # FIX: Simplify prediction for multi-class and remove binary threshold logic
+    # Make predictions
     y_pred_train = best_model.predict(Xtrain)
     y_pred_test = best_model.predict(Xtest)
 
-    # Use classification_report directly on multi-class predictions
+    # Generate classification reports
     train_report = classification_report(ytrain, y_pred_train, output_dict=True)
     test_report = classification_report(ytest, y_pred_test, output_dict=True)
 
-    # Log the metrics for the best model
-    # FIX: Adjust logged metrics for multi-class, using 'macro avg' for aggregated metrics.
+    # Log the metrics for the best model (binary classification)
     mlflow.log_metrics({
         "train_accuracy": train_report['accuracy'],
-        "train_macro_precision": train_report['macro avg']['precision'],
-        "train_macro_recall": train_report['macro avg']['recall'],
-        "train_macro_f1-score": train_report['macro avg']['f1-score'],
+        "train_precision_1": train_report['1']['precision'], # Assuming '1' is the positive class
+        "train_recall_1": train_report['1']['recall'],
+        "train_f1-score_1": train_report['1']['f1-score'],
         "test_accuracy": test_report['accuracy'],
-        "test_macro_precision": test_report['macro avg']['precision'],
-        "test_macro_recall": test_report['macro avg']['recall'],
-        "test_macro_f1-score": test_report['macro avg']['f1-score']
+        "test_precision_1": test_report['1']['precision'],
+        "test_recall_1": test_report['1']['recall'],
+        "test_f1-score_1": test_report['1']['f1-score']
     })
 
     # Save the model locally
-    model_path = "best_tourism_model_v1.joblib"
+    model_path = "best_prod_taken_model_v1.joblib"
     joblib.dump(best_model, model_path)
 
     # Log the model artifact
@@ -138,7 +149,7 @@ with mlflow.start_run():
     print(f"Model saved as artifact at: {model_path}")
 
     # Upload to Hugging Face
-    repo_id = "divyavarmamisc/tourism_model"
+    repo_id = "divyavarmamisc/prod_taken_model"
     repo_type = "model"
 
     # Step 1: Check if the space exists
@@ -149,11 +160,16 @@ with mlflow.start_run():
         print(f"Space '{repo_id}' not found. Creating new space...")
         create_repo(repo_id=repo_id, repo_type=repo_type, private=False)
         print(f"Space '{repo_id}' created.")
+    except HfHubHTTPError as e:
+        print(f"An error occurred during repo info or creation: {e}")
+        if "401 Unauthorized" in str(e):
+            print("Please check your Hugging Face token. It might be invalid or missing.")
+        raise # Re-raise the exception after printing details
 
-    # create_repo("churn-model", repo_type="model", private=False)
     api.upload_file(
-        path_or_fileobj="best_tourism_model_v1.joblib",
-        path_in_repo="best_tourism_model_v1.joblib",
+        path_or_fileobj="best_prod_taken_model_v1.joblib",
+        path_in_repo="best_prod_taken_model_v1.joblib",
         repo_id=repo_id,
         repo_type=repo_type,
     )
+

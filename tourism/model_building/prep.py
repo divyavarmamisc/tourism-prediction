@@ -7,138 +7,76 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.compose import make_column_transformer
 from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import LabelEncoder
-from sklearn.model_selection import train_test_split
 from huggingface_hub import login, HfApi, hf_hub_download
 # for model training, tuning, and evaluation
 import xgboost as xgb
+
 from sklearn.model_selection import GridSearchCV
 import mlflow
 from sklearn.metrics import accuracy_score, classification_report, recall_score
 # for model serialization
 import joblib
+from sklearn.utils.class_weight import compute_class_weight # Import compute_class_weight
 
+# For Hugging Face authentication and API access
+# Ensure HF_TOKEN is available as an environment variable or via userdata in Colab
+# For script execution in environments like GitHub Actions, an env var is preferred.
+# For local execution in Colab, userdata.get('HF_TOKEN') would be used.
+# Here we assume HF_TOKEN is set in the environment or passed when executing the script.
 
-df = pd.read_csv("tourism/data/tourism.csv")
-print("Dataset loaded successfully.")
+# Dummy token for local testing if not in Colab/GH Actions
+token = os.getenv("HF_TOKEN", "hf_dummy_token_for_testing")
 
+# Login to Hugging Face Hub if a valid token is available
+if token and token != "hf_dummy_token_for_testing":
+    login(token=token, add_to_git_credential=False)
 
+api = HfApi(token=token)
 
-# Encoding the categorical 'Type' column
-label_encoder = LabelEncoder()
-df['Gender'] = label_encoder.fit_transform(df['Gender'])
+HF_REPO_ID = "divyavarmamisc/tourism-prediction"
+HF_DATASET_FILENAME = "tourism.csv"
 
-target_col = 'NumberOfPersonVisiting'
+# Download the dataset file explicitly using hf_hub_download
+try:
+    dataset_local_path = hf_hub_download(
+        repo_id=HF_REPO_ID,
+        filename=HF_DATASET_FILENAME,
+        repo_type="dataset",
+        token=token # Explicitly pass the token
+    )
+    df = pd.read_csv(dataset_local_path)
+    print("Dataset loaded successfully.")
+except Exception as e:
+    print(f"Error downloading or loading dataset: {e}")
+    raise
 
-# Split into X (features) and y (target)
-X = df.drop(columns=[target_col])
-y = df[target_col] - 1 # Subtract 1 to make target classes 0-indexed for XGBoost Classifier
+# Define target and features
+target_col = 'ProdTaken'
+id_cols = ['Unnamed: 0', 'CustomerID'] # Columns to be dropped as they are identifiers
+
+# Separate target from features
+y = df[target_col]
+# Remove target and identifier columns from features
+X = df.drop(columns=[target_col] + id_cols)
 
 # Perform train-test split
 Xtrain, Xtest, ytrain, ytest = train_test_split(
-    X, y, test_size=0.2, random_state=42)
-
-
-# One-hot encode 'Type' and scale numeric features
-numeric_features = [
-    'NumberOfFollowups',
-    'NumberOfTrips',
-    'PreferredPropertyStar',
-    'PitchSatisfactionScore',
-    'MonthlyIncome',
-    'NumberOfChildrenVisiting'
-]
-categorical_features = ['Gender']
-
-
-# Removed class_weight calculation as it's for binary classification (0/1 target)
-# and 'NumberOfPersonVisiting' is not a binary target with 0 as a class.
-# class_weight = ytrain.value_counts()[0] / ytrain.value_counts()[1]
-# class_weight
-
-# Define the preprocessing steps
-preprocessor = make_column_transformer(
-    (StandardScaler(), numeric_features),
-    (OneHotEncoder(handle_unknown='ignore'), categorical_features)
+    X, y, test_size=0.2, random_state=42
 )
 
-# Define base XGBoost model
-# Removed scale_pos_weight as it's for binary classification
-xgb_model = xgb.XGBClassifier(random_state=42)
+# Save processed data to CSV files
+Xtrain.to_csv("Xtrain.csv", index=False)
+Xtest.to_csv("Xtest.csv", index=False)
+ytrain.to_csv("ytrain.csv", index=False)
+ytest.to_csv("ytest.csv", index=False)
 
+# Upload processed data to Hugging Face Hub
+files_to_upload = ["Xtrain.csv", "Xtest.csv", "ytrain.csv", "ytest.csv"]
 
-# Define hyperparameter grid
-param_grid = {
-    'xgbclassifier__n_estimators': [50, 75, 100],
-    'xgbclassifier__max_depth': [2, 3, 4],
-    'xgbclassifier__colsample_bytree': [0.4, 0.5, 0.6],
-    'xgbclassifier__colsample_bylevel': [0.4, 0.5, 0.6],
-    'xgbclassifier__learning_rate': [0.01, 0.05, 0.1],
-    'xgbclassifier__reg_lambda': [0.4, 0.5, 0.6],
-}
-
-# Model pipeline
-model_pipeline = make_pipeline(preprocessor, xgb_model)
-
-with mlflow.start_run():
-    # Hyperparameter tuning
-    grid_search = GridSearchCV(model_pipeline, param_grid, cv=5, n_jobs=-1)
-    grid_search.fit(Xtrain, ytrain)
-
-    # Log all parameter combinations and their mean test scores
-    results = grid_search.cv_results_
-    for i in range(len(results['params'])):
-        param_set = results['params'][i]
-        mean_score = results['mean_test_score'][i]
-        std_score = results['std_test_score'][i]
-
-        # Log each combination as a separate MLflow run
-        with mlflow.start_run(nested=True):
-            mlflow.log_params(param_set)
-            mlflow.log_metric("mean_test_score", mean_score)
-            mlflow.log_metric("std_test_score", std_score)
-
-    # Log best parameters separately in main run
-    mlflow.log_params(grid_search.best_params_)
-
-    # Store and evaluate the best model
-    best_model = grid_search.best_estimator_
-
-    # The classification_threshold is typically used for binary classification.
-    # For multi-class, predict_proba returns probabilities for each class,
-    # and argmax is usually used to get the predicted class.
-    # If 'NumberOfPersonVisiting' is intended as a categorical target,
-    # predict() will directly return the class labels.
-    # Keeping threshold for consistency, but be aware of its multi-class interpretation.
-    classification_threshold = 0.45 # This threshold might need adjustment for multi-class
-
-    y_pred_train_proba = best_model.predict_proba(Xtrain)
-    # Assuming 1 is a relevant class for binary-like evaluation within multi-class context
-    # For true multi-class, y_pred_train should be best_model.predict(Xtrain)
-    y_pred_train = (y_pred_train_proba[:, best_model.classes_.tolist().index(1)] >= classification_threshold).astype(int) if 1 in best_model.classes_ else best_model.predict(Xtrain)
-
-    y_pred_test_proba = best_model.predict_proba(Xtest)
-    y_pred_test = (y_pred_test_proba[:, best_model.classes_.tolist().index(1)] >= classification_threshold).astype(int) if 1 in best_model.classes_ else best_model.predict(Xtest)
-
-    train_report = classification_report(ytrain, y_pred_train, output_dict=True)
-    test_report = classification_report(ytest, y_pred_test, output_dict=True)
-
-    # Log the metrics. Adjusting to handle cases where class '1' might not exist or interpretation differs.
-    logged_metrics = {
-        "train_accuracy": train_report['accuracy'],
-        "test_accuracy": test_report['accuracy']
-    }
-    if '1' in train_report: # Check if class '1' exists in reports for precision/recall/f1
-        logged_metrics.update({
-            "train_precision": train_report['1']['precision'],
-            "train_recall": train_report['1']['recall'],
-            "train_f1-score": train_report['1']['f1-score']
-        })
-    if '1' in test_report:
-        logged_metrics.update({
-            "test_precision": test_report['1']['precision'],
-            "test_recall": test_report['1']['recall'],
-            "test_f1-score": test_report['1']['f1-score']
-        })
-
-    mlflow.log_metrics(logged_metrics)
+for file_path in files_to_upload:
+    api.upload_file(
+        path_or_fileobj=file_path,
+        path_in_repo=file_path.split("/")[-1],
+        repo_id=HF_REPO_ID,
+        repo_type="dataset",
+    )
